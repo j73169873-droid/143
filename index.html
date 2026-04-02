@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Rust Infinite - Бесконечный мир 10x10 с подгрузкой чанков</title>
+    <title>Rust Infinite - ПКМ для руки, плавка, подсказки крафта</title>
     <style>
         * {
             user-select: none;
@@ -66,7 +66,7 @@
             border-radius: 20px;
             padding: 12px;
             border: 1px solid #5f874b;
-            max-height: 380px;
+            max-height: 420px;
             overflow-y: auto;
         }
         .inv-section {
@@ -108,6 +108,7 @@
             background-repeat: no-repeat;
             background-position: center 10px;
             padding-top: 24px;
+            position: relative;
         }
         .slot.selected {
             border: 3px solid #ffd966;
@@ -141,6 +142,7 @@
             font-family: monospace;
             cursor: pointer;
             font-size: 11px;
+            position: relative;
         }
         .craft-area {
             display: flex;
@@ -152,6 +154,29 @@
             background: #2e4a2c;
             font-size: 10px;
             padding: 4px 10px;
+            transition: 0.1s;
+        }
+        .craft-btn:hover {
+            background: #5a8a48;
+            transform: scale(1.02);
+        }
+        /* тултип для крафта */
+        .craft-btn[data-tooltip]:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 130%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #0a0f1ecc;
+            backdrop-filter: blur(8px);
+            color: #ffefb9;
+            font-size: 10px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            white-space: nowrap;
+            border: 1px solid #9bba7e;
+            z-index: 100;
+            font-family: monospace;
         }
         .log {
             background: #030b05b3;
@@ -185,11 +210,11 @@
     </div>
     <div class="inventory-panel">
         <div class="inv-section">
-            <div class="inv-title">🎒 ИНВЕНТАРЬ (6x3)</div>
+            <div class="inv-title">🎒 ИНВЕНТАРЬ (6x3) - ПКМ по предмету → в руку</div>
             <div id="inventoryGrid" class="slot-grid" style="display: grid; grid-template-columns: repeat(6, 64px);"></div>
         </div>
         <div class="inv-section">
-            <div class="inv-title">⚔️ РУКА (6 слотов) - колесо мыши / клик</div>
+            <div class="inv-title">⚔️ РУКА (6 слотов) - ЛКМ выбор / ПКМ убрать в инвентарь</div>
             <div id="handSlots" class="slot-grid" style="display: grid; grid-template-columns: repeat(6, 64px);"></div>
         </div>
         <div class="inv-section">
@@ -198,24 +223,20 @@
         </div>
         <div class="craft-area" id="craftArea"></div>
         <div class="weapon-hotbar">
-            <span>🎮 Управление: Ц/↑ вперед | Ы/↓ назад | В/→ вправо | Ф/← влево | У - инвентарь | П - карта (биом)</span>
+            <span>🎮 Управление: Ц/↑ вперед | Ы/↓ назад | В/→ вправо | Ф/← влево | У - инвентарь | П - биом</span>
+            <span>🔨 ПКМ по слоту инвентаря = взять в руку</span>
         </div>
-        <div class="log" id="gameLog">[RUST] Бесконечный мир! Видимость 10x10, новые земли генерируются автоматически. Камень-инструмент (10 камня) бьет кабанов на 5 урона.</div>
+        <div class="log" id="gameLog">[RUST] ПКМ по предмету в инвентаре переносит в руку. Плавка: 3 дерева = 1 железо, 2 дерева = 1 сера. Наведи на крафт для ресурсов.</div>
     </div>
 </div>
 
 <script>
-    // РАЗМЕР ВИДИМОЙ ОБЛАСТИ 10x10 клеток
+    // РАЗМЕР ВИДИМОЙ ОБЛАСТИ 10x10
     const VISIBLE_SIZE = 10;
-    const TILE_SIZE = 60;   // 600x600 canvas
+    const TILE_SIZE = 60;
     let player = { x: 0, y: 0, hp: 40, maxHp: 100, food: 100, water: 100, maxFood:500, maxWater:500 };
     
-    // Хранилище загруженных чанков: ключ "x,y" -> массив 10x10 (объекты тайлов)
     let loadedChunks = new Map();
-    // Текущие границы отрисовки: вычисляются от позиции игрока
-    let currentChunkMinX = 0, currentChunkMinY = 0;
-    
-    // Инвентарь и броня
     let inventory = Array(18).fill(null).map(() => ({ id: null, count: 0 }));
     let handSlots = Array(6).fill(null).map(() => ({ id: null, count: 0 }));
     let armorSlots = Array(6).fill(null).map(() => ({ id: null, count: 0 }));
@@ -223,7 +244,7 @@
     
     // ---------- ОПРЕДЕЛЕНИЯ ПРЕДМЕТОВ ----------
     const itemsDef = {
-        stone_tool: { name:"Камень (инструмент)", stack: 1, dmg:5, mineWoodTime:20, mineStoneTime:30, mineIron:false, mineSulfur:false },
+        stone_tool: { name:"Камень (инструмент)", stack: 1, dmg:5, mineWoodTime:20, mineStoneTime:30, canMineWood:true, canMineStone:true },
         wood: { name:"Древесина", stack: 500 },
         stone: { name:"Камень", stack: 500 },
         metal: { name:"Металл", stack: 300 },
@@ -235,8 +256,8 @@
         roadsign: { name:"Дорожный знак", stack: 20 },
         gunpowder: { name:"Порох", stack: 100 },
         ammo: { name:"Патроны", stack: 64 },
-        pickaxe: { name:"Кирка", stack: 1, mineWoodTime:null, mineStoneTime:15, mineIronTime:15, mineSulfurTime:20 },
-        axe: { name:"Топор", stack: 1, mineWoodTime:10, mineStoneTime:null },
+        pickaxe: { name:"Кирка", stack: 1, mineStoneTime:15, mineIronTime:15, mineSulfurTime:20 },
+        axe: { name:"Топор", stack: 1, mineWoodTime:10 },
         machete: { name:"Мачете", stack: 1, dmg: 50 },
         gun: { name:"Пистолет", stack: 1, dmg: 100, ranged:true },
         furnace: { name:"Печь", stack: 1 },
@@ -248,24 +269,25 @@
         chestplate: { name:"Нагрудник", armor: 20 }
     };
     
+    // Рецепты крафта с описанием для тултипа
     const recipes = {
-        stone_tool: { need: { stone: 10 }, result: { id: "stone_tool", count: 1 } },
-        pickaxe: { need: { stone: 500, wood: 200 }, result: { id: "pickaxe", count: 1 } },
-        axe: { need: { stone: 400, wood: 150 }, result: { id: "axe", count: 1 } },
-        machete: { need: { metal: 100, wood: 300, pipe: 1 }, result: { id: "machete", count: 1 } },
-        gun: { need: { metal: 200, wood: 300, spring: 1, pipe: 1 }, result: { id: "gun", count: 1 } },
-        furnace: { need: { stone: 400, wood: 400 }, result: { id: "furnace", count: 1 } },
-        ammo: { need: { metal: 20, gunpowder: 10 }, result: { id: "ammo", count: 4 } },
-        gunpowder: { need: { sulfur: 20, coal: 30 }, result: { id: "gunpowder", count: 10 } },
-        pipe: { need: { metal: 40 }, result: { id: "pipe", count: 1 } },
-        spring: { need: { metal: 60 }, result: { id: "spring", count: 1 } },
-        roadsign: { need: { metal: 40 }, result: { id: "roadsign", count: 1 } },
-        boots: { need: { metal: 20, cloth: 30 }, result: { id: "boots", count: 1 } },
-        pants: { need: { cloth: 50 }, result: { id: "pants", count: 1 } },
-        hoodie: { need: { cloth: 60 }, result: { id: "hoodie", count: 1 } },
-        helmet: { need: { metal: 100, cloth: 20 }, result: { id: "helmet", count: 1 } },
-        gloves: { need: { cloth: 40, metal: 10 }, result: { id: "gloves", count: 1 } },
-        chestplate: { need: { cloth: 50, metal: 200, roadsign: 4 }, result: { id: "chestplate", count: 1 } }
+        stone_tool: { need: { stone: 10 }, result: { id: "stone_tool", count: 1 }, desc: "10 камня" },
+        pickaxe: { need: { stone: 500, wood: 200 }, result: { id: "pickaxe", count: 1 }, desc: "500 камня, 200 дерева" },
+        axe: { need: { stone: 400, wood: 150 }, result: { id: "axe", count: 1 }, desc: "400 камня, 150 дерева" },
+        machete: { need: { metal: 100, wood: 300, pipe: 1 }, result: { id: "machete", count: 1 }, desc: "100 металла, 300 дерева, 1 труба" },
+        gun: { need: { metal: 200, wood: 300, spring: 1, pipe: 1 }, result: { id: "gun", count: 1 }, desc: "200 металла, 300 дерева, пружина, труба" },
+        furnace: { need: { stone: 400, wood: 400 }, result: { id: "furnace", count: 1 }, desc: "400 камня, 400 дерева" },
+        ammo: { need: { metal: 20, gunpowder: 10 }, result: { id: "ammo", count: 4 }, desc: "20 металла, 10 пороха" },
+        gunpowder: { need: { sulfur: 20, coal: 30 }, result: { id: "gunpowder", count: 10 }, desc: "20 серы, 30 угля" },
+        pipe: { need: { metal: 40 }, result: { id: "pipe", count: 1 }, desc: "40 металла" },
+        spring: { need: { metal: 60 }, result: { id: "spring", count: 1 }, desc: "60 металла" },
+        roadsign: { need: { metal: 40 }, result: { id: "roadsign", count: 1 }, desc: "40 металла" },
+        boots: { need: { metal: 20, cloth: 30 }, result: { id: "boots", count: 1 }, desc: "20 металла, 30 ткани" },
+        pants: { need: { cloth: 50 }, result: { id: "pants", count: 1 }, desc: "50 ткани" },
+        hoodie: { need: { cloth: 60 }, result: { id: "hoodie", count: 1 }, desc: "60 ткани" },
+        helmet: { need: { metal: 100, cloth: 20 }, result: { id: "helmet", count: 1 }, desc: "100 металла, 20 ткани" },
+        gloves: { need: { cloth: 40, metal: 10 }, result: { id: "gloves", count: 1 }, desc: "40 ткани, 10 металла" },
+        chestplate: { need: { cloth: 50, metal: 200, roadsign: 4 }, result: { id: "chestplate", count: 1 }, desc: "50 ткани, 200 металла, 4 знака" }
     };
     
     function getItemName(id) { return itemsDef[id]?.name || id; }
@@ -273,13 +295,11 @@
     function getTotalAnimalDefense() {
         let bonus = 0;
         const armorMap = { chestplate:20, boots:5, pants:10, hoodie:15, helmet:10, gloves:5 };
-        armorSlots.forEach(slot => {
-            if(slot && slot.id && armorMap[slot.id]) bonus += armorMap[slot.id];
-        });
+        armorSlots.forEach(slot => { if(slot && slot.id && armorMap[slot.id]) bonus += armorMap[slot.id]; });
         return bonus;
     }
     
-    // ---- ФУНКЦИИ ИНВЕНТАРЯ ----
+    // ---------- ФУНКЦИИ ИНВЕНТАРЯ ----------
     function addItemToInventory(itemId, qty) {
         let left = qty;
         let maxStack = itemsDef[itemId]?.stack || 999;
@@ -329,6 +349,35 @@
         return false;
     }
     
+    // Перенос предмета из инвентаря в первый свободный слот руки (ПКМ)
+    function moveFromInventoryToHand(invIndex) {
+        let item = inventory[invIndex];
+        if(!item || !item.id) return false;
+        // ищем свободный слот в руке
+        let emptySlot = handSlots.findIndex(s => s.id === null);
+        if(emptySlot === -1) { logMessage("Все слоты руки заняты!"); return false; }
+        // если предмет стакаемый? но инструменты стак 1, ресурсы тоже можно класть
+        let newItem = { id: item.id, count: item.count };
+        handSlots[emptySlot] = newItem;
+        inventory[invIndex] = { id: null, count: 0 };
+        logMessage(`${getItemName(newItem.id)} перенесён в руку (слот ${emptySlot+1})`);
+        renderAll();
+        return true;
+    }
+    
+    // Убрать из руки в инвентарь (ПКМ по слоту руки)
+    function moveFromHandToInventory(handIndex) {
+        let item = handSlots[handIndex];
+        if(!item || !item.id) return false;
+        if(addItemToInventory(item.id, item.count)) {
+            handSlots[handIndex] = { id: null, count: 0 };
+            logMessage(`${getItemName(item.id)} убран в инвентарь`);
+            renderAll();
+            return true;
+        }
+        return false;
+    }
+    
     function hasMaterials(needObj) {
         for(let [id,amt] of Object.entries(needObj)) {
             let total = 0;
@@ -348,34 +397,45 @@
     function craft(itemKey) {
         let rec = recipes[itemKey];
         if(!rec) return;
-        if(!hasMaterials(rec.need)) { logMessage(`Не хватает ресурсов для ${itemKey}!`); return; }
+        if(!hasMaterials(rec.need)) { logMessage(`Не хватает ресурсов: ${rec.desc}`); return; }
         consumeMaterials(rec.need);
         addItemToInventory(rec.result.id, rec.result.count);
         logMessage(`Скрафтили ${getItemName(rec.result.id)} x${rec.result.count}`);
         renderAll();
     }
     
+    // НОВАЯ ПЛАВКА: 3 дерева на железо, 2 дерева на серу
+    function smeltIron() {
+        if(removeItemFromInvOrHand('wood', 3)) {
+            addItemToInventory('metal', 1);
+            logMessage("Плавка: 3 дерева → 1 железо");
+        } else logMessage("Нужно 3 дерева для выплавки железа");
+        renderAll();
+    }
+    function smeltSulfur() {
+        if(removeItemFromInvOrHand('wood', 2)) {
+            addItemToInventory('sulfur', 1);
+            logMessage("Плавка: 2 дерева → 1 сера");
+        } else logMessage("Нужно 2 дерева для выплавки серы");
+        renderAll();
+    }
     function smeltCoal() {
-        if(removeItemFromInvOrHand('wood',2)) { addItemToInventory('coal',1); logMessage("Печь: 2 дерева → 1 уголь"); }
-        else logMessage("Нужно 2 дерева");
-        renderAll();
-    }
-    function smeltOre(oreType, resultType) {
-        if(removeItemFromInvOrHand(oreType,1)) { addItemToInventory(resultType,1); logMessage(`Печь: ${oreType} → ${resultType}`); }
-        else logMessage(`Нет ${oreType}`);
+        if(removeItemFromInvOrHand('wood', 2)) {
+            addItemToInventory('coal', 1);
+            logMessage("Печь: 2 дерева → 1 уголь");
+        } else logMessage("Нужно 2 дерева для угля");
         renderAll();
     }
     
-    // ----- ГЕНЕРАЦИЯ ЧАНКА (10x10) с натуральными биомами через шум -----
+    // ----- ГЕНЕРАЦИЯ МИРА (бесконечные чанки) -----
     function simpleNoise(x, y, seed) {
-        let val = Math.sin(x * 0.15 + seed) * Math.cos(y * 0.15 + seed*1.3);
-        val += 0.5 * Math.sin(x * 0.4 + 1.2) * Math.cos(y * 0.35 + 0.7);
-        return (val + 1) / 2; // 0..1
+        let val = Math.sin(x * 0.12 + seed) * Math.cos(y * 0.12 + seed*1.2);
+        val += 0.5 * Math.sin(x * 0.35 + 1.3) * Math.cos(y * 0.3 + 0.8);
+        return (val + 1) / 2;
     }
-    
     function getBiomeForTile(worldX, worldY) {
         let n = simpleNoise(worldX, worldY, 42.7);
-        let n2 = simpleNoise(worldX*1.7, worldY*1.4, 18.2);
+        let n2 = simpleNoise(worldX*1.5, worldY*1.3, 18.2);
         let mix = (n + n2*0.6) / 1.6;
         if(mix < 0.25) return 'winter';
         if(mix < 0.45) return 'desert';
@@ -384,113 +444,72 @@
     }
     
     function generateChunk(chunkX, chunkY) {
-        // chunkX, chunkY - координаты чанка в мировых (каждый чанк 10x10 клеток)
         let chunkData = Array(VISIBLE_SIZE).fill().map(() => Array(VISIBLE_SIZE).fill(null));
         let baseWorldX = chunkX * VISIBLE_SIZE;
         let baseWorldY = chunkY * VISIBLE_SIZE;
-        
-        // лимиты ресурсов на чанк (чтобы не было перенасыщения)
         let woodLeft = 8, stoneLeft = 5, ironLeft = 4, sulfurLeft = 3, boarLeft = 2, clothLeft = 5;
-        
         for(let i=0; i<VISIBLE_SIZE; i++) {
             for(let j=0; j<VISIBLE_SIZE; j++) {
                 let worldX = baseWorldX + j;
                 let worldY = baseWorldY + i;
                 let biome = getBiomeForTile(worldX, worldY);
                 let tileObj = { biome: biome, resource: null };
-                
                 let r = Math.random();
-                // распределение ресурсов с учетом биома
                 if(woodLeft > 0 && (biome === 'plain' || biome === 'jungle') && r < 0.25) {
-                    tileObj.resource = { type:'wood' };
-                    woodLeft--;
+                    tileObj.resource = { type:'wood' }; woodLeft--;
                 }
-                else if(stoneLeft > 0 && r < 0.18) {
-                    tileObj.resource = { type:'stone' };
-                    stoneLeft--;
-                }
-                else if(ironLeft > 0 && r < 0.14) {
-                    tileObj.resource = { type:'iron' };
-                    ironLeft--;
-                }
-                else if(sulfurLeft > 0 && r < 0.12) {
-                    tileObj.resource = { type:'sulfur' };
-                    sulfurLeft--;
-                }
-                else if(boarLeft > 0 && r < 0.1) {
-                    tileObj.resource = { type:'boar', hp: 150 };
-                    boarLeft--;
-                }
-                else if(clothLeft > 0 && biome === 'plain' && r < 0.2) {
-                    tileObj.resource = { type:'cloth' };
-                    clothLeft--;
-                }
+                else if(stoneLeft > 0 && r < 0.18) { tileObj.resource = { type:'stone' }; stoneLeft--; }
+                else if(ironLeft > 0 && r < 0.14) { tileObj.resource = { type:'iron' }; ironLeft--; }
+                else if(sulfurLeft > 0 && r < 0.12) { tileObj.resource = { type:'sulfur' }; sulfurLeft--; }
+                else if(boarLeft > 0 && r < 0.1) { tileObj.resource = { type:'boar', hp: 150 }; boarLeft--; }
+                else if(clothLeft > 0 && biome === 'plain' && r < 0.2) { tileObj.resource = { type:'cloth' }; clothLeft--; }
                 chunkData[i][j] = tileObj;
             }
         }
         return chunkData;
     }
     
-    // Загрузить чанки вокруг игрока (область 3x3 чанков для плавности, но отрисовываем только центральный?)
-    // Чтобы при движении не было пустот, подгружаем чанки, где игрок может оказаться.
     function ensureChunkLoaded(chunkX, chunkY) {
         let key = `${chunkX},${chunkY}`;
-        if(!loadedChunks.has(key)) {
-            let newChunk = generateChunk(chunkX, chunkY);
-            loadedChunks.set(key, newChunk);
-        }
+        if(!loadedChunks.has(key)) loadedChunks.set(key, generateChunk(chunkX, chunkY));
     }
     
     function updateVisibleChunks() {
-        // Определяем чанк, в котором находится игрок
         let playerChunkX = Math.floor(player.x / VISIBLE_SIZE);
         let playerChunkY = Math.floor(player.y / VISIBLE_SIZE);
-        // Подгружаем соседние чанки (3x3)
-        for(let dx = -1; dx <= 1; dx++) {
-            for(let dy = -1; dy <= 1; dy++) {
-                let cx = playerChunkX + dx;
-                let cy = playerChunkY + dy;
-                ensureChunkLoaded(cx, cy);
-            }
-        }
-        // Для отрисовки используем текущий чанк игрока, но также можем отрисовать части соседних, если игрок у края
-        currentChunkMinX = playerChunkX * VISIBLE_SIZE;
-        currentChunkMinY = playerChunkY * VISIBLE_SIZE;
+        for(let dx = -1; dx <= 1; dx++)
+            for(let dy = -1; dy <= 1; dy++)
+                ensureChunkLoaded(playerChunkX + dx, playerChunkY + dy);
     }
     
-    // Получить тайл по глобальным координатам
     function getTileAtWorld(worldX, worldY) {
         let chunkX = Math.floor(worldX / VISIBLE_SIZE);
         let chunkY = Math.floor(worldY / VISIBLE_SIZE);
-        let key = `${chunkX},${chunkY}`;
-        let chunk = loadedChunks.get(key);
+        let chunk = loadedChunks.get(`${chunkX},${chunkY}`);
         if(!chunk) return null;
         let localX = worldX - chunkX * VISIBLE_SIZE;
         let localY = worldY - chunkY * VISIBLE_SIZE;
-        if(localX < 0 || localX >= VISIBLE_SIZE || localY < 0 || localY >= VISIBLE_SIZE) return null;
+        if(localX<0 || localX>=VISIBLE_SIZE || localY<0 || localY>=VISIBLE_SIZE) return null;
         return chunk[localY][localX];
     }
     
     function setTileResource(worldX, worldY, newResource) {
         let chunkX = Math.floor(worldX / VISIBLE_SIZE);
         let chunkY = Math.floor(worldY / VISIBLE_SIZE);
-        let key = `${chunkX},${chunkY}`;
-        let chunk = loadedChunks.get(key);
+        let chunk = loadedChunks.get(`${chunkX},${chunkY}`);
         if(!chunk) return;
         let localX = worldX - chunkX * VISIBLE_SIZE;
         let localY = worldY - chunkY * VISIBLE_SIZE;
-        if(localX >=0 && localX < VISIBLE_SIZE && localY>=0 && localY<VISIBLE_SIZE) {
+        if(localX>=0 && localX<VISIBLE_SIZE && localY>=0 && localY<VISIBLE_SIZE)
             chunk[localY][localX].resource = newResource;
-        }
     }
     
-    // ---- СБОР РЕСУРСОВ И БОЙ ----
+    // СБОР РЕСУРСОВ И БОЙ
     function gatherResource(worldX, worldY) {
         let tile = getTileAtWorld(worldX, worldY);
         if(!tile || !tile.resource) { logMessage("Здесь ничего нет"); return; }
         let res = tile.resource;
         if(res.type === 'boar') { logMessage("Атакуй кабана оружием (ЛКМ)!"); return; }
-        
         let tool = handSlots[selectedHandIndex];
         let toolId = tool?.id;
         let success = false;
@@ -554,7 +573,6 @@
             inventory[ammoIndex].count--;
             if(inventory[ammoIndex].count===0) inventory[ammoIndex]={id:null,count:0};
         }
-        
         let defense = getTotalAnimalDefense();
         let finalDamage = isRanged ? baseDmg : Math.floor(baseDmg * (1 + defense/100));
         boarRes.hp -= finalDamage;
@@ -566,12 +584,11 @@
             renderWorld();
             return true;
         }
-        // обновляем ресурс в чанке
         setTileResource(worldX, worldY, boarRes);
         return false;
     }
     
-    // ---- ОТРИСОВКА (видимая область 10x10 вокруг игрока) ----
+    // ОТРИСОВКА МИРА (видимость 10х10)
     let canvas, ctx;
     function renderWorld() {
         let startX = player.x - 5;
@@ -581,11 +598,7 @@
                 let worldX = startX + j;
                 let worldY = startY + i;
                 let tile = getTileAtWorld(worldX, worldY);
-                if(!tile) { // на случай незагруженного края — серая зона
-                    ctx.fillStyle = "#333";
-                    ctx.fillRect(j*TILE_SIZE, i*TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                    continue;
-                }
+                if(!tile) { ctx.fillStyle="#333"; ctx.fillRect(j*TILE_SIZE, i*TILE_SIZE, TILE_SIZE, TILE_SIZE); continue; }
                 let biome = tile.biome;
                 let color = '#8cb06b';
                 if(biome === 'winter') color = '#c7e9ff';
@@ -605,33 +618,20 @@
                     else if(res.type === 'iron') ctx.fillText('⛏️', j*TILE_SIZE+18, i*TILE_SIZE+42);
                     else if(res.type === 'sulfur') ctx.fillText('💛', j*TILE_SIZE+20, i*TILE_SIZE+42);
                     else if(res.type === 'cloth') ctx.fillText('🧵', j*TILE_SIZE+20, i*TILE_SIZE+42);
-                    else if(res.type === 'boar') { 
-                        ctx.fillText('🐗', j*TILE_SIZE+18, i*TILE_SIZE+38); 
-                        ctx.font = '12px monospace';
-                        ctx.fillText(`${res.hp}`, j*TILE_SIZE+22, i*TILE_SIZE+58);
-                        ctx.font = 'bold 20px monospace';
-                    }
+                    else if(res.type === 'boar') { ctx.fillText('🐗', j*TILE_SIZE+18, i*TILE_SIZE+38); ctx.font='12px monospace'; ctx.fillText(`${res.hp}`, j*TILE_SIZE+22, i*TILE_SIZE+58); }
                 }
             }
         }
-        // рисуем игрока по центру (локально 5,5)
-        let px = 5 * TILE_SIZE + TILE_SIZE/2 - 12;
-        let py = 5 * TILE_SIZE + TILE_SIZE/2 - 12;
+        let px = 5*TILE_SIZE+18, py = 5*TILE_SIZE+18;
         ctx.fillStyle = '#e5c28e';
-        ctx.beginPath();
-        ctx.arc(px+12, py+12, 18, 0, Math.PI*2);
-        ctx.fill();
-        ctx.fillStyle = 'black';
-        ctx.font = 'bold 20px monospace';
-        ctx.fillText("🧑", px, py+6);
+        ctx.beginPath(); ctx.arc(px, py, 16, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'black'; ctx.font = 'bold 20px monospace';
+        ctx.fillText("🧑", px-10, py+6);
     }
     
     function movePlayer(dx, dy) {
-        let nx = player.x + dx;
-        let ny = player.y + dy;
-        player.x = nx;
-        player.y = ny;
-        updateVisibleChunks();   // подгружаем новые чанки при движении
+        player.x += dx; player.y += dy;
+        updateVisibleChunks();
         renderWorld();
         document.getElementById('coordX').innerText = player.x;
         document.getElementById('coordY').innerText = player.y;
@@ -640,10 +640,11 @@
     function renderInventoryUI() {
         let invDiv=document.getElementById('inventoryGrid');
         invDiv.innerHTML='';
-        inventory.forEach((slot)=>{
+        inventory.forEach((slot, idx)=>{
             let d=document.createElement('div'); d.className='slot';
             if(slot.id) d.innerHTML=`${getItemName(slot.id)}<br>${slot.count}`;
             else d.innerHTML='---', d.classList.add('empty');
+            d.oncontextmenu = (e) => { e.preventDefault(); moveFromInventoryToHand(idx); return false; };
             invDiv.appendChild(d);
         });
         let handDiv=document.getElementById('handSlots');
@@ -652,7 +653,8 @@
             let d=document.createElement('div'); d.className=`slot ${selectedHandIndex===idx?'selected':''}`;
             if(slot.id) d.innerHTML=`${getItemName(slot.id)}<br>${slot.count}`;
             else d.innerHTML='---', d.classList.add('empty');
-            d.onclick=()=>{ selectedHandIndex=idx; renderInventoryUI(); };
+            d.onclick = ()=> { selectedHandIndex=idx; renderInventoryUI(); };
+            d.oncontextmenu = (e) => { e.preventDefault(); moveFromHandToInventory(idx); return false; };
             handDiv.appendChild(d);
         });
         let armorDiv=document.getElementById('armorSlots');
@@ -672,12 +674,11 @@
     function logMessage(msg) { let l=document.getElementById('gameLog'); l.innerHTML+=`<div>${msg}</div>`; l.scrollTop=l.scrollHeight; }
     function renderAll() { renderWorld(); renderInventoryUI(); }
     
-    // ---- СТАРТ ----
+    // ИНИЦИАЛИЗАЦИЯ
     window.onload=()=>{
         canvas=document.getElementById('gameCanvas');
         ctx=canvas.getContext('2d');
-        // начальная загрузка чанков вокруг (0,0)
-        player.x = 0; player.y = 0;
+        player.x=0; player.y=0;
         updateVisibleChunks();
         addItemToInventory('stone_tool',1);
         addItemToInventory('wood',30);
@@ -692,11 +693,8 @@
             let worldX = player.x + tileX;
             let worldY = player.y + tileY;
             let tile = getTileAtWorld(worldX, worldY);
-            if(tile && tile.resource && tile.resource.type === 'boar') {
-                attackBoar(worldX, worldY, tile.resource);
-            } else {
-                gatherResource(worldX, worldY);
-            }
+            if(tile && tile.resource && tile.resource.type === 'boar') attackBoar(worldX, worldY, tile.resource);
+            else gatherResource(worldX, worldY);
             renderAll();
         });
         
@@ -707,26 +705,23 @@
             if(k==='в'||k==='ArrowRight') movePlayer(1,0);
             if(k==='ф'||k==='ArrowLeft') movePlayer(-1,0);
             if(k==='у') document.querySelector('.inventory-panel').style.display='block';
-            if(k==='п') { 
-                let tile = getTileAtWorld(player.x, player.y);
-                alert(`Позиция: X=${player.x}, Y=${player.y} | Биом: ${tile?.biome || 'unknown'}`);
-            }
+            if(k==='п') { let tile=getTileAtWorld(player.x,player.y); alert(`Позиция: X=${player.x}, Y=${player.y} | Биом: ${tile?.biome}`); }
         });
         
         let craftDiv=document.getElementById('craftArea');
-        let allCrafts=['stone_tool','pickaxe','axe','machete','gun','furnace','ammo','gunpowder','pipe','spring','roadsign','boots','pants','hoodie','helmet','gloves','chestplate'];
-        allCrafts.forEach(c=>{
+        for(let [key, rec] of Object.entries(recipes)) {
             let btn=document.createElement('button');
-            btn.innerText=`🔨 ${c}`;
+            btn.innerText=`🔨 ${key}`;
             btn.className='craft-btn';
-            btn.onclick=()=>craft(c);
+            btn.setAttribute('data-tooltip', `需要: ${rec.desc}`);
+            btn.onclick=()=>craft(key);
             craftDiv.appendChild(btn);
-        });
+        }
         let furnaceDiv=document.createElement('div'); furnaceDiv.style.marginTop='8px';
-        let coalBtn=document.createElement('button'); coalBtn.innerText='🔥 Уголь (2 дерева)'; coalBtn.onclick=()=>smeltCoal();
-        let ironBtn=document.createElement('button'); ironBtn.innerText='⚙️ Плавка жел.руда→металл'; ironBtn.onclick=()=>smeltOre('metal','metal');
-        let sulfurBtn=document.createElement('button'); sulfurBtn.innerText='💨 Сера руда→сера'; sulfurBtn.onclick=()=>smeltOre('sulfur','sulfur');
-        furnaceDiv.append(coalBtn,ironBtn,sulfurBtn);
+        let ironSmelt=document.createElement('button'); ironSmelt.innerText='🔥 Выплавка железа (3 дерева → 1 металл)'; ironSmelt.onclick=()=>smeltIron();
+        let sulfurSmelt=document.createElement('button'); sulfurSmelt.innerText='🔥 Выплавка серы (2 дерева → 1 сера)'; sulfurSmelt.onclick=()=>smeltSulfur();
+        let coalBtn=document.createElement('button'); coalBtn.innerText='🔥 Уголь (2 дерева → 1 уголь)'; coalBtn.onclick=()=>smeltCoal();
+        furnaceDiv.append(ironSmelt, sulfurSmelt, coalBtn);
         craftDiv.after(furnaceDiv);
         
         setInterval(()=>{
@@ -736,7 +731,7 @@
             if(player.hp<=0) { alert("Вы погибли! Возрождение."); player.hp=40; player.food=100; player.water=100; }
             renderInventoryUI();
         }, 4000);
-        logMessage("Бесконечный мир активен! При движении генерируются новые земли. Биомы — натуральные пятна.");
+        logMessage("ПКМ по предмету в инвентаре = взять в руку. Плавка: железо = 3 дерева, сера = 2 дерева. Наведи на кнопку крафта для списка ресурсов.");
     };
 </script>
 </body>
