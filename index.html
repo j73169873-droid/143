@@ -686,4 +686,58 @@
         
         canvas.addEventListener('click',(e)=>{
             let rect=canvas.getBoundingClientRect(), scaleX=canvas.width/rect.width, scaleY=canvas.height/rect.height;
-            let mouse
+            let mouseX=(e.clientX-rect.left)*scaleX, mouseY=(e.clientY-rect.top)*scaleY;
+            let tileX = Math.floor(mouseX/TILE_SIZE) - 5;
+            let tileY = Math.floor(mouseY/TILE_SIZE) - 5;
+            let worldX = player.x + tileX;
+            let worldY = player.y + tileY;
+            let tile = getTileAtWorld(worldX, worldY);
+            if(tile && tile.resource && tile.resource.type === 'boar') {
+                attackBoar(worldX, worldY, tile.resource);
+            } else {
+                gatherResource(worldX, worldY);
+            }
+            renderAll();
+        });
+        
+        document.addEventListener('keydown',(e)=>{
+            let k=e.key;
+            if(k==='ц'||k==='ArrowUp') movePlayer(0,-1);
+            if(k==='ы'||k==='ArrowDown') movePlayer(0,1);
+            if(k==='в'||k==='ArrowRight') movePlayer(1,0);
+            if(k==='ф'||k==='ArrowLeft') movePlayer(-1,0);
+            if(k==='у') document.querySelector('.inventory-panel').style.display='block';
+            if(k==='п') { 
+                let tile = getTileAtWorld(player.x, player.y);
+                alert(`Позиция: X=${player.x}, Y=${player.y} | Биом: ${tile?.biome || 'unknown'}`);
+            }
+        });
+        
+        let craftDiv=document.getElementById('craftArea');
+        let allCrafts=['stone_tool','pickaxe','axe','machete','gun','furnace','ammo','gunpowder','pipe','spring','roadsign','boots','pants','hoodie','helmet','gloves','chestplate'];
+        allCrafts.forEach(c=>{
+            let btn=document.createElement('button');
+            btn.innerText=`🔨 ${c}`;
+            btn.className='craft-btn';
+            btn.onclick=()=>craft(c);
+            craftDiv.appendChild(btn);
+        });
+        let furnaceDiv=document.createElement('div'); furnaceDiv.style.marginTop='8px';
+        let coalBtn=document.createElement('button'); coalBtn.innerText='🔥 Уголь (2 дерева)'; coalBtn.onclick=()=>smeltCoal();
+        let ironBtn=document.createElement('button'); ironBtn.innerText='⚙️ Плавка жел.руда→металл'; ironBtn.onclick=()=>smeltOre('metal','metal');
+        let sulfurBtn=document.createElement('button'); sulfurBtn.innerText='💨 Сера руда→сера'; sulfurBtn.onclick=()=>smeltOre('sulfur','sulfur');
+        furnaceDiv.append(coalBtn,ironBtn,sulfurBtn);
+        craftDiv.after(furnaceDiv);
+        
+        setInterval(()=>{
+            if(player.food>0) player.food=Math.max(0,player.food-1);
+            if(player.water>0) player.water=Math.max(0,player.water-1);
+            if(player.food===0 || player.water===0) player.hp=Math.max(0,player.hp-3);
+            if(player.hp<=0) { alert("Вы погибли! Возрождение."); player.hp=40; player.food=100; player.water=100; }
+            renderInventoryUI();
+        }, 4000);
+        logMessage("Бесконечный мир активен! При движении генерируются новые земли. Биомы — натуральные пятна.");
+    };
+</script>
+</body>
+</html>
